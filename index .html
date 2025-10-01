@@ -1,0 +1,471 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Budget Tracker</title>
+<style>
+body{font-family:Arial,sans-serif;background:#f9f9f9;margin:0;padding:0;}
+.container{max-width:900px;margin:20px auto;background:#fff;padding:20px;border-radius:12px;box-shadow:0 4px 8px rgba(0,0,0,0.1);}
+input,select,button{width:100%;padding:10px;margin:5px 0;border-radius:8px;border:1px solid #ccc;font-family:Arial;}
+button{background:#0077b6;color:#fff;border:none;cursor:pointer;}
+button:hover{background:#005f86;}
+.income-block{border:1px solid #ddd;border-radius:10px;padding:15px;margin-bottom:15px;background:#fdfdfd;}
+.expense{color:red;margin-left:20px;}
+.balance{margin-top:5px;font-weight:bold;color:#444;}
+.month-buttons{margin-bottom:10px;}
+.month-buttons button{margin:2px;padding:5px 10px;border:none;border-radius:5px;color:#fff;cursor:pointer;}
+.selectedMonth{border:2px solid #000;}
+.progress{background:#eee;border-radius:5px;height:20px;margin:5px 0;position:relative;}
+.progress-bar{height:100%;border-radius:5px;text-align:center;color:white;font-weight:bold;line-height:20px;}
+.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:none;justify-content:center;align-items:center;}
+.modal-content{background:#fff;padding:20px;border-radius:10px;max-height:90%;overflow:auto;width:90%;font-family:Arial;}
+.summary-total{font-weight:bold;margin-top:10px;font-size:1.1em;}
+</style>
+</head>
+<body>
+
+<!-- PASSCODE SCREEN -->
+<div class="container" id="passcodeDiv">
+<h2>Set Your Passcode</h2>
+<label>Enter Passcode:</label>
+<input type="password" id="passcodeInput">
+<label>Confirm Passcode:</label>
+<input type="password" id="passcodeConfirm">
+<button id="setPasscodeBtn">Set Passcode</button>
+</div>
+
+<!-- SETUP SCREEN -->
+<div class="container" id="setupDiv" style="display:none;">
+<h2 id="welcomeLabel">Welcome</h2>
+<label id="usernameLabel">Username:</label>
+<input type="text" id="username">
+<label id="languageLabel">Select Language:</label>
+<select id="languageSelect">
+<option value="en">English</option>
+<option value="fr">Français</option>
+<option value="pt">Português</option>
+</select>
+<label id="monthLabel">Start Month:</label>
+<input type="month" id="startMonth">
+<label id="currencyLabel">Currency:</label>
+<select id="currencySelect"></select>
+<button id="startBtn">Start App</button>
+</div>
+
+<!-- DASHBOARD -->
+<div class="container" id="dashboardDiv" style="display:none;">
+<button id="backBtn">Back</button>
+<h2 id="dashboardHeader">Dashboard</h2>
+<div class="month-buttons" id="monthButtons"></div>
+
+<h3 id="incomeSectionLabel">Add Income</h3>
+<input type="text" id="incomeDesc" placeholder="Income description">
+<input type="number" id="incomeAmount" placeholder="Amount">
+<button id="addIncomeBtn">Add Income</button>
+
+<h3 id="expenseSectionLabel">Add Expense</h3>
+<select id="expenseIncomeSelect"></select>
+<input type="text" id="expenseDesc" placeholder="Expense description">
+<input type="number" id="expenseAmount" placeholder="Amount">
+<button id="addExpenseBtn">Add Expense</button>
+
+<h3 id="projectSectionLabel">Add Project</h3>
+<input type="text" id="projectName" placeholder="Project name">
+<input type="number" id="projectTarget" placeholder="Target amount">
+<button id="addProjectBtn">Add Project</button>
+
+<h3 id="allocateSectionLabel">Allocate Savings</h3>
+<select id="projectSelect"></select>
+<select id="incomeSelectForAllocation"></select>
+<input type="number" id="allocationAmount" placeholder="Amount">
+<button id="allocateBtn">Allocate</button>
+
+<h3 id="monthlyOverviewLabel">Monthly Overview</h3>
+<div id="monthlyOverview"></div>
+
+<h3 id="projectsOverviewLabel">Projects Overview</h3>
+<div id="projectsOverview"></div>
+
+<h3 id="summaryLabel">Summary</h3>
+<button id="viewSummaryBtn">View Summary</button>
+
+<div class="modal" id="reportModal">
+<div class="modal-content">
+<button onclick="closeReport()">Close</button>
+<pre id="reportText"></pre>
+<button onclick="printReport()">Print</button>
+<button id="downloadBtn">Save as PDF</button>
+</div></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+let settings={username:'',language:'en',currency:'USD',startMonth:'',selectedMonth:''};
+let data={incomes:[],projects:[]};
+let selectedMonth='';
+
+// ---------------- PASSCODE ----------------
+let storedPasscode = localStorage.getItem('budgetApp_passcode');
+let storedSettings = localStorage.getItem('budgetApp_settings');
+if(storedSettings) settings=JSON.parse(storedSettings);
+
+const passcodeDiv = document.getElementById('passcodeDiv');
+const setupDiv = document.getElementById('setupDiv');
+
+function showDashboard(){
+    passcodeDiv.style.display='none';
+    setupDiv.style.display='none';
+    document.getElementById('dashboardDiv').style.display='block';
+    selectedMonth=settings.selectedMonth||settings.startMonth;
+    loadData();
+    createMonthButtons();
+    updateUI();
+    applyLanguage();
+}
+
+document.getElementById('setPasscodeBtn').addEventListener('click', () => {
+    const pass = document.getElementById('passcodeInput').value;
+    const confirmPass = document.getElementById('passcodeConfirm').value;
+    if(!pass || !confirmPass){alert('Enter both fields'); return;}
+    if(pass!==confirmPass){alert('Passcodes do not match'); return;}
+    localStorage.setItem('budgetApp_passcode', pass);
+    alert('Passcode set successfully!');
+    showSetup();
+});
+
+function showSetup(){
+    passcodeDiv.style.display='none';
+    setupDiv.style.display='block';
+    applyLanguage();
+}
+
+// If passcode exists, prompt for it
+if(storedPasscode){
+    setupDiv.style.display='none';
+    passcodeDiv.innerHTML = `<h2>Enter Your Passcode</h2>
+    <input type="password" id="enterPasscode">
+    <button id="enterPasscodeBtn">Enter</button>`;
+    document.getElementById('enterPasscodeBtn').addEventListener('click', ()=>{
+        const val=document.getElementById('enterPasscode').value;
+        if(val===storedPasscode) showDashboard();
+        else alert('Incorrect passcode');
+    });
+}else{
+    passcodeDiv.style.display='block';
+}
+
+// ---------------- LANGUAGES ----------------
+const LANGS={
+en:{welcome:"Welcome",username:"Username",language:"Select Language",month:"Start Month",currency:"Currency",startBtn:"Start App",
+income:"Add Income",expense:"Add Expense",projects:"Add Project",allocate:"Allocate Savings",
+monthlyOverview:"Monthly Overview",projectsOverview:"Projects Overview",summary:"Summary",
+incomePlaceholder:"Income description",amountPlaceholder:"Amount",expenseDescPlaceholder:"Expense description",
+projectNamePlaceholder:"Project name",projectTargetPlaceholder:"Target amount",allocationAmountPlaceholder:"Amount",
+addIncomeBtn:"Add Income",addExpenseBtn:"Add Expense",addProjectBtn:"Add Project",allocateBtn:"Allocate",
+backBtn:"Back",viewSummaryBtn:"View Summary",closeBtn:"Close",printBtn:"Print",savePDFBtn:"Save as PDF"},
+fr:{welcome:"Bienvenue",username:"Nom d'utilisateur",language:"Choisir la langue",month:"Mois de début",currency:"Devise",startBtn:"Démarrer",
+income:"Ajouter un revenu",expense:"Ajouter une dépense",projects:"Ajouter un projet",allocate:"Allouer l'épargne",
+monthlyOverview:"Aperçu mensuel",projectsOverview:"Aperçu des projets",summary:"Résumé",
+incomePlaceholder:"Description du revenu",amountPlaceholder:"Montant",expenseDescPlaceholder:"Description de la dépense",
+projectNamePlaceholder:"Nom du projet",projectTargetPlaceholder:"Montant cible",allocationAmountPlaceholder:"Montant",
+addIncomeBtn:"Ajouter un revenu",addExpenseBtn:"Ajouter une dépense",addProjectBtn:"Ajouter un projet",allocateBtn:"Allouer",
+backBtn:"Retour",viewSummaryBtn:"Voir Résumé",closeBtn:"Fermer",printBtn:"Imprimer",savePDFBtn:"Enregistrer PDF"},
+pt:{welcome:"Bem-vindo",username:"Nome de usuário",language:"Selecionar idioma",month:"Mês inicial",currency:"Moeda",startBtn:"Iniciar App",
+income:"Adicionar Renda",expense:"Adicionar Despesa",projects:"Adicionar Projeto",allocate:"Alocar Poupança",
+monthlyOverview:"Resumo Mensal",projectsOverview:"Resumo de Projetos",summary:"Resumo",
+incomePlaceholder:"Descrição da renda",amountPlaceholder:"Valor",expenseDescPlaceholder:"Descrição da despesa",
+projectNamePlaceholder:"Nome do projeto",projectTargetPlaceholder:"Valor alvo",allocationAmountPlaceholder:"Valor",
+addIncomeBtn:"Adicionar Renda",addExpenseBtn:"Adicionar Despesa",addProjectBtn:"Adicionar Projeto",allocateBtn:"Alocar",
+backBtn:"Voltar",viewSummaryBtn:"Ver Resumo",closeBtn:"Fechar",printBtn:"Imprimir",savePDFBtn:"Salvar PDF"}
+};
+
+function applyLanguage(){
+    let t=LANGS[settings.language];
+    document.getElementById('welcomeLabel').textContent=t.welcome;
+    document.getElementById('usernameLabel').textContent=t.username;
+    document.getElementById('languageLabel').textContent=t.language;
+    document.getElementById('monthLabel').textContent=t.month;
+    document.getElementById('currencyLabel').textContent=t.currency;
+    document.getElementById('startBtn').textContent=t.startBtn;
+    document.getElementById('incomeSectionLabel').textContent=t.income;
+    document.getElementById('expenseSectionLabel').textContent=t.expense;
+    document.getElementById('projectSectionLabel').textContent=t.projects;
+    document.getElementById('allocateSectionLabel').textContent=t.allocate;
+    document.getElementById('monthlyOverviewLabel').textContent=t.monthlyOverview;
+    document.getElementById('projectsOverviewLabel').textContent=t.projectsOverview;
+    document.getElementById('summaryLabel').textContent=t.summary;
+
+    document.getElementById('incomeDesc').placeholder=t.incomePlaceholder;
+    document.getElementById('incomeAmount').placeholder=t.amountPlaceholder;
+    document.getElementById('expenseDesc').placeholder=t.expenseDescPlaceholder;
+    document.getElementById('projectName').placeholder=t.projectNamePlaceholder;
+    document.getElementById('projectTarget').placeholder=t.projectTargetPlaceholder;
+    document.getElementById('allocationAmount').placeholder=t.allocationAmountPlaceholder;
+
+    document.getElementById('addIncomeBtn').textContent=t.addIncomeBtn;
+    document.getElementById('addExpenseBtn').textContent=t.addExpenseBtn;
+    document.getElementById('addProjectBtn').textContent=t.addProjectBtn;
+    document.getElementById('allocateBtn').textContent=t.allocateBtn;
+    document.getElementById('backBtn').textContent=t.backBtn;
+    document.getElementById('viewSummaryBtn').textContent=t.viewSummaryBtn;
+    document.querySelector('#reportModal button[onclick="closeReport()"]').textContent=t.closeBtn;
+    document.querySelector('#reportModal button[onclick="printReport()"]').textContent=t.printBtn;
+    document.getElementById('downloadBtn').textContent=t.savePDFBtn;
+}
+
+document.getElementById('languageSelect').addEventListener('change', ()=>{
+    settings.language=document.getElementById('languageSelect').value;
+    saveSettings();
+    applyLanguage();
+});
+
+// ---------------- CURRENCIES ----------------
+const CURRENCIES=["USD","GNF","EUR","CFA","NGN","GHS","KES","UGX","TZS","ZAR"];
+const curSelect=document.getElementById('currencySelect');
+CURRENCIES.forEach(c=>{ let o=document.createElement('option'); o.value=c; o.textContent=c; curSelect.appendChild(o); });
+
+// ---------------- DATA ----------------
+function saveData(){ localStorage.setItem('budgetData',JSON.stringify(data)); saveSettings(); }
+function loadData(){ let d=localStorage.getItem('budgetData'); if(d) data=JSON.parse(d); }
+function saveSettings(){ localStorage.setItem('budgetApp_settings',JSON.stringify(settings)); }
+
+// ---------------- START APP ----------------
+document.getElementById('startBtn').addEventListener('click', ()=>{
+    const username=document.getElementById('username').value.trim();
+    const month=document.getElementById('startMonth').value;
+    const currency=document.getElementById('currencySelect').value;
+    if(!username || !month){ alert('Please fill all fields'); return; }
+    settings.username=username; settings.startMonth=month; settings.currency=currency; settings.selectedMonth=month;
+    saveSettings();
+    showDashboard();
+});
+
+// ---------------- BACK BUTTON ----------------
+document.getElementById('backBtn').addEventListener('click', ()=>{
+    document.getElementById('dashboardDiv').style.display='none';
+    setupDiv.style.display='block';
+    document.getElementById('username').value = settings.username;
+    document.getElementById('languageSelect').value = settings.language;
+    document.getElementById('currencySelect').value = settings.currency;
+    document.getElementById('startMonth').value = settings.startMonth;
+    applyLanguage();
+});
+
+// ---------------- MONTH BUTTONS WITH ACTIVITY HIGHLIGHT ----------------
+function createMonthButtons(){
+    const container=document.getElementById('monthButtons'); 
+    container.innerHTML='';
+    const start=new Date(settings.startMonth); 
+    const today=new Date();
+    let temp=new Date(start);
+
+    while(temp<=today){
+        const btn=document.createElement('button');
+        const monthStr=temp.toISOString().substr(0,7);
+        btn.textContent=temp.toLocaleString(settings.language,{month:'short',year:'numeric'});
+
+        // Check if month has activity
+        const hasActivity = data.incomes.some(i=>i.month===monthStr) ||
+                            data.projects.some(p=>p.allocatedPerMonth[monthStr] && p.allocatedPerMonth[monthStr]>0);
+        btn.style.background = hasActivity ? '#28a745' : '#0077b6';
+
+        btn.addEventListener('click',()=>{
+            selectedMonth=monthStr;
+            settings.selectedMonth=selectedMonth;
+            saveSettings();
+            updateUI();
+            highlightSelectedMonth();
+        });
+        container.appendChild(btn);
+        temp.setMonth(temp.getMonth()+1);
+    }
+    highlightSelectedMonth();
+}
+
+function highlightSelectedMonth(){
+    document.querySelectorAll('#monthButtons button').forEach(b=>b.classList.remove('selectedMonth'));
+    document.querySelectorAll('#monthButtons button').forEach(b=>{
+        const btnMonth = new Date(selectedMonth).toLocaleString(settings.language,{month:'short',year:'numeric'});
+        if(b.textContent === btnMonth) b.classList.add('selectedMonth');
+    });
+}
+
+// ---------------- ADD INCOME ----------------
+document.getElementById('addIncomeBtn').addEventListener('click', addIncome);
+function addIncome(){
+    const desc=document.getElementById('incomeDesc').value.trim();
+    const amt=parseFloat(document.getElementById('incomeAmount').value);
+    if(!desc || isNaN(amt)){ alert('Enter valid income'); return; }
+    const now=new Date().toLocaleString();
+    data.incomes.push({desc,amt,month:selectedMonth,expenses:[],allocations:{},dateTime:now});
+    saveData(); document.getElementById('incomeDesc').value=''; document.getElementById('incomeAmount').value='';
+    updateUI();
+    createMonthButtons();
+}
+
+// ---------------- ADD EXPENSE ----------------
+document.getElementById('addExpenseBtn').addEventListener('click', addExpense);
+function addExpense(){
+    const idx=document.getElementById('expenseIncomeSelect').selectedIndex;
+    if(idx<0){ alert('Select income'); return; }
+    const inc = data.incomes.filter(i=>i.month===selectedMonth)[idx];
+    const desc=document.getElementById('expenseDesc').value.trim();
+    const amt=parseFloat(document.getElementById('expenseAmount').value);
+    if(!desc || isNaN(amt)){ alert('Enter valid expense'); return; }
+    const now=new Date().toLocaleString();
+    inc.expenses.push({desc,amt,dateTime:now});
+    saveData(); document.getElementById('expenseDesc').value=''; document.getElementById('expenseAmount').value='';
+    updateUI();
+    createMonthButtons();
+}
+
+// ---------------- ADD PROJECT ----------------
+document.getElementById('addProjectBtn').addEventListener('click', addProject);
+function addProject(){
+    const name=document.getElementById('projectName').value.trim();
+    const target=parseFloat(document.getElementById('projectTarget').value);
+    if(!name || isNaN(target)){ alert('Enter valid project'); return; }
+    data.projects.push({name,target,allocatedPerMonth:{}});
+    saveData(); document.getElementById('projectName').value=''; document.getElementById('projectTarget').value='';
+    updateUI();
+    createMonthButtons();
+}
+
+// ---------------- ALLOCATE ----------------
+document.getElementById('allocateBtn').addEventListener('click', allocateToProject);
+function allocateToProject(){
+    const projIdx=document.getElementById('projectSelect').selectedIndex;
+    const incIdx=document.getElementById('incomeSelectForAllocation').selectedIndex;
+    if(projIdx<0 || incIdx<0){ alert('Select project and income'); return; }
+    const proj=data.projects[projIdx];
+    const inc=data.incomes.filter(i=>i.month===selectedMonth)[incIdx];
+    const amt=parseFloat(document.getElementById('allocationAmount').value);
+    if(isNaN(amt) || amt<=0){ alert('Enter valid amount'); return; }
+    if(!proj.allocatedPerMonth[selectedMonth]) proj.allocatedPerMonth[selectedMonth]=0;
+    if(!inc.allocations[selectedMonth]) inc.allocations[selectedMonth]=0;
+    if(amt>inc.amt - inc.expenses.reduce((a,b)=>a+b.amt,0) - inc.allocations[selectedMonth]){
+        alert('Not enough available income'); return;
+    }
+    proj.allocatedPerMonth[selectedMonth]+=amt;
+    inc.allocations[selectedMonth]+=amt;
+    saveData(); document.getElementById('allocationAmount').value=''; updateUI();
+    createMonthButtons();
+}
+
+// ---------------- UPDATE UI ----------------
+function updateUI(){
+    const expSel=document.getElementById('expenseIncomeSelect');
+    const allocSel=document.getElementById('incomeSelectForAllocation');
+    const projSel=document.getElementById('projectSelect');
+    expSel.innerHTML=''; allocSel.innerHTML=''; projSel.innerHTML='';
+
+    const monthlyIncomes=data.incomes.filter(i=>i.month===selectedMonth);
+    monthlyIncomes.forEach((inc,i)=>{
+        const opt1=document.createElement('option'); opt1.value=i;
+        opt1.textContent=`${inc.desc} (${settings.currency} ${inc.amt})`; expSel.appendChild(opt1);
+        const opt2=document.createElement('option'); opt2.value=i;
+        opt2.textContent=`${inc.desc} (${settings.currency} ${inc.amt})`; allocSel.appendChild(opt2);
+    });
+
+    data.projects.forEach((p,i)=>{
+        const o=document.createElement('option'); o.value=i;
+        const allocated = p.allocatedPerMonth[selectedMonth] || 0;
+        o.textContent=`${p.name} (${settings.currency} ${allocated}/${p.target})`;
+        projSel.appendChild(o);
+    });
+
+    // Monthly Overview
+    const monthDiv=document.getElementById('monthlyOverview'); monthDiv.innerHTML='';
+    monthlyIncomes.forEach(inc=>{
+        const div=document.createElement('div'); div.className='income-block';
+        const totalExp=inc.expenses.reduce((a,b)=>a+b.amt,0);
+        const allocated=inc.allocations[selectedMonth]||0;
+        const remaining=inc.amt-totalExp-allocated;
+        div.innerHTML=`<strong>${inc.desc}</strong>: ${settings.currency} ${inc.amt} - Expenses: ${settings.currency} ${totalExp} - Allocated: ${settings.currency} ${allocated} - Remaining: ${settings.currency} ${remaining}`;
+        inc.expenses.forEach(e=>{
+            const p=document.createElement('p'); p.className='expense';
+            p.textContent=`${e.desc}: ${settings.currency} ${e.amt} (at ${e.dateTime})`; div.appendChild(p);
+        });
+        if(allocated>0){
+            const allocBreak=document.createElement('p'); allocBreak.style.fontWeight='bold';
+            allocBreak.textContent=`Allocated to projects: ${settings.currency} ${allocated}`;
+            div.appendChild(allocBreak);
+        }
+        monthDiv.appendChild(div);
+    });
+
+    // Projects Overview
+    const projDiv=document.getElementById('projectsOverview'); projDiv.innerHTML='';
+    data.projects.forEach(p=>{
+        const allocated=p.allocatedPerMonth[selectedMonth]||0;
+        projDiv.innerHTML+=`<p>${p.name}: ${settings.currency} ${allocated}/${p.target}</p>`;
+    });
+}
+
+// ---------------- REPORT ----------------
+document.getElementById('viewSummaryBtn').addEventListener('click', openReport);
+function openReport(){ document.getElementById('reportModal').style.display='flex'; generateReport(); }
+function closeReport(){ document.getElementById('reportModal').style.display='none'; }
+
+function generateReport(){
+    let txt=`Budget Summary for ${settings.username} (${selectedMonth})\n\nIncomes:\n`;
+    const monthlyIncomes=data.incomes.filter(i=>i.month===selectedMonth);
+    monthlyIncomes.forEach(i=>{
+        const totalExp=i.expenses.reduce((a,b)=>a+b.amt,0);
+        const allocated=i.allocations[selectedMonth]||0;
+        const remaining=i.amt-totalExp-allocated;
+        txt+=`- ${i.desc}: ${settings.currency} ${i.amt} (added at ${i.dateTime})\n`;
+        i.expenses.forEach(e=>{ txt+=`   - ${e.desc}: ${settings.currency} ${e.amt} (at ${e.dateTime})\n`; });
+        if(allocated>0){ txt+=`   - Allocated to projects: ${settings.currency} ${allocated}\n`; }
+        txt+=`   - Remaining: ${settings.currency} ${remaining}\n`;
+    });
+    txt+="\nProjects:\n";
+    data.projects.forEach(p=>{
+        const allocated=p.allocatedPerMonth[selectedMonth]||0;
+        txt+=`- ${p.name}: ${settings.currency} ${allocated}/${p.target}\n`;
+    });
+    document.getElementById('reportText').textContent=txt;
+}
+
+// ---------------- PRINT & SAVE PDF ----------------
+// ---------------- PRINT & SAVE PDF ----------------
+function printReport(){
+    const reportContent = document.getElementById('reportText').textContent;
+    const printWindow = window.open('', '', 'width=800,height=600');
+    printWindow.document.write(`<pre style="font-family: Arial; font-size: 14px;">${reportContent}</pre>`);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+}
+
+document.getElementById('downloadBtn').addEventListener('click', ()=>{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({
+        orientation: 'portrait',
+        unit: 'pt',
+        format: 'a4'
+    });
+
+    const reportLines = document.getElementById('reportText').textContent.split('\n');
+    let y = 40; // initial top margin
+    doc.setFontSize(12);
+    reportLines.forEach(line => {
+        if(y > 800){ // create a new page if content exceeds page height
+            doc.addPage();
+            y = 40;
+        }
+        doc.text(line, 40, y);
+        y += 18; // line height
+    });
+
+    doc.save(`Budget_Summary_${selectedMonth}.pdf`);
+});
+
+
+// ---------------- INITIALIZE ----------------
+loadData(); applyLanguage();
+</script>
+</body>
+</html>
